@@ -29,6 +29,20 @@
 - Host: `marquez-db`
 - DB / User / Pass: `marquez` / `marquez` / `marquez`
 
+## OpenMetadata (data catalog) — runs in Docker
+- URL: http://localhost:8585/
+- Username: `admin@open-metadata.org`
+- Password: `admin`
+
+**Bot JWT token (required for the portal to publish)**:
+1. Log in to OpenMetadata UI.
+2. Click **Settings → Bots → `ingestion-bot`**.
+3. Click **Copy** next to *Token*.
+4. Paste into `.env` as `OPENMETADATA_JWT_TOKEN=<token>`.
+5. Run `make restart-portal`.
+
+Until this token is pasted, the portal falls back to MOCK mode (writes payloads to `./alation_sync/*.json`).
+
 ## Alation (user must supply)
 - Set in `.env`: `ALATION_BASE_URL`, `ALATION_REFRESH_TOKEN`, `ALATION_USER_ID`, `ALATION_DATA_SOURCE_ID`, `ALATION_FOLDER_ID`.
 - Default mode is `mock` — no creds required for demo.

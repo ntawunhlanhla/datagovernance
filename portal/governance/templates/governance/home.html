@@ -28,6 +28,7 @@
         <nav>
             <a href="/admin/">Admin</a>
             <a href="/admin/governance/generationrun/generator/">Data Generator</a>
+            <a href="http://localhost:8585" target="_blank">OpenMetadata</a>
             <a href="http://localhost:9001" target="_blank">MinIO</a>
             <a href="http://localhost:3000" target="_blank">Marquez</a>
             <a href="http://localhost:8081" target="_blank">Schema Registry</a>
@@ -49,8 +50,8 @@
         </div>
         <div class="card">
             <h3>3. Publish</h3>
-            <p>Pipeline auto-generates a data contract, registers schemas, emits Marquez lineage, and publishes the Data Product to Alation.</p>
-            <a href="/admin/governance/dataproduct/" class="pill ok">View Data Products →</a>
+            <p>Pipeline auto-generates a data contract, registers schemas, emits Marquez lineage, and publishes the Data Product to <strong>OpenMetadata</strong> (or Alation).</p>
+            <a href="http://localhost:8585" target="_blank" class="pill ok">Open OpenMetadata →</a>
         </div>
     </div>
 
@@ -74,14 +75,14 @@
     <h2 style="margin-top:30px;">Recent data products</h2>
     <div class="card">
         <table>
-            <thead><tr><th>Name</th><th>Domain</th><th>Tier</th><th>Status</th><th>Alation ID</th></tr></thead>
+            <thead><tr><th>Name</th><th>Domain</th><th>Tier</th><th>Status</th><th>Catalog</th></tr></thead>
             <tbody>
             {% for p in recent_products %}
             <tr>
                 <td><a href="/admin/governance/dataproduct/{{ p.id }}/change/">{{ p.name }}</a></td>
                 <td>{{ p.domain }}</td><td>{{ p.tier }}</td>
                 <td><span class="pill {% if p.status == 'published' %}ok{% elif p.status == 'failed' %}err{% else %}warn{% endif %}">{{ p.get_status_display }}</span></td>
-                <td><code>{{ p.alation_id|default:"—" }}</code></td>
+                <td>{% if p.external_url %}<a href="{{ p.external_url }}" target="_blank">{{ p.catalog_provider }}: {{ p.external_id|slice:":12" }}</a>{% else %}<code>{{ p.external_id|default:"—" }}</code>{% endif %}</td>
             </tr>
             {% empty %}<tr><td colspan="5" style="color:#888;">No data products yet — upload an Excel.</td></tr>{% endfor %}
             </tbody>

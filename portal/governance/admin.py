@@ -12,7 +12,7 @@ from .models import (
     LineageEdge,
     QualityRule,
     DataProductUpload,
-    AlationSyncLog,
+    CatalogSyncLog,
 )
 
 admin.site.site_header = "Metadata Governance Platform"
@@ -85,17 +85,19 @@ class GenerationRunAdmin(admin.ModelAdmin):
 
 @admin.register(DataProduct)
 class DataProductAdmin(admin.ModelAdmin):
-    list_display = ("name", "domain", "tier", "status", "owner_email", "alation_link", "published_at")
-    list_filter = ("status", "tier", "domain")
+    list_display = ("name", "domain", "tier", "status", "owner_email", "catalog_link", "published_at")
+    list_filter = ("status", "tier", "domain", "catalog_provider")
     search_fields = ("name", "domain", "owner_email")
     inlines = [DatasetInline, LineageEdgeInline]
-    readonly_fields = ("status", "alation_id", "contract_object_key", "error", "published_at")
+    readonly_fields = ("status", "catalog_provider", "external_id", "external_url", "contract_object_key", "error", "published_at")
 
-    def alation_link(self, obj):
-        if not obj.alation_id:
+    def catalog_link(self, obj):
+        if not obj.external_id:
             return "—"
-        return format_html('<code>{}</code>', obj.alation_id)
-    alation_link.short_description = "Alation ID"
+        if obj.external_url:
+            return format_html('<a href="{}" target="_blank"><code>{}</code></a>', obj.external_url, obj.external_id[:18])
+        return format_html('<code>{}</code>', obj.external_id[:18])
+    catalog_link.short_description = "Catalog ID"
 
 
 @admin.register(Dataset)
@@ -118,8 +120,8 @@ class DataProductUploadAdmin(admin.ModelAdmin):
         super().save_model(request, obj, form, change)
 
 
-@admin.register(AlationSyncLog)
-class AlationSyncLogAdmin(admin.ModelAdmin):
-    list_display = ("id", "data_product", "mode", "success", "created_at")
-    list_filter = ("mode", "success")
-    readonly_fields = [f.name for f in AlationSyncLog._meta.fields]
+@admin.register(CatalogSyncLog)
+class CatalogSyncLogAdmin(admin.ModelAdmin):
+    list_display = ("id", "data_product", "provider", "success", "created_at")
+    list_filter = ("provider", "success")
+    readonly_fields = [f.name for f in CatalogSyncLog._meta.fields]

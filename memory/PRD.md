@@ -22,19 +22,21 @@ Docker startup must: build images, run migrations, init MinIO buckets, generate 
 13 docker-compose services with healthchecks + dependency ordering. `init-job` runs once to create buckets. `metadata-portal` runs migrations + collectstatic + superuser bootstrap on first start. Three Celery workers: default queue, pipeline queue (ingestion), generator queue (data-generator).
 
 ## Implementation status (this session)
-- [x] docker-compose.yml (13 services + 5 volumes, healthchecks, depends_on conditions)
+- [x] docker-compose.yml (19 services: portal stack + OpenMetadata stack, healthchecks, depends_on conditions)
 - [x] Makefile (up/down/logs/migrate/generate-*/nuke/...)
 - [x] .env.example, .gitignore
 - [x] portal/Dockerfile + entrypoint.sh + requirements.txt
 - [x] Django project (settings, urls, wsgi, asgi, celery)
 - [x] governance app: models (10), admin, urls, views, signals, apps, tasks
-- [x] Services: minio_client, schema_registry, marquez_client, alation_client (real+mock), llm_designer (Emergent LLM), data_generator (Faker → Parquet streaming), excel_service (build + parse), contract_generator (YAML)
+- [x] Services: minio_client, schema_registry, marquez_client, llm_designer (Emergent LLM), data_generator (Faker → Parquet streaming), excel_service (build + parse), contract_generator (YAML)
+- [x] **catalog/ adapter package**: base + mock + openmetadata (default) + alation, plus `get_catalog_client()` factory
 - [x] Connectors: base + minio (full) + s3 + athena + glue + marquez
-- [x] Templates: admin generator page (with Large confirm modal), home page, change_list extension
+- [x] **OpenMetadata services**: openmetadata-db, openmetadata-opensearch, openmetadata-migrate, openmetadata-server (image `docker.getcollate.io/openmetadata/server:1.5.13`)
+- [x] Templates: admin generator page (with Large confirm modal), home page with OpenMetadata link, change_list extension
 - [x] Management commands: generate_dataset, sync_alation
 - [x] init-job (Dockerfile + init.py, creates 4 MinIO buckets)
 - [x] nginx (Dockerfile + config, port 80 → portal, static/media served from volumes)
-- [x] README with end-to-end walkthrough
+- [x] README with end-to-end walkthrough + OpenMetadata bot token setup
 
 ## What's NOT done (deferred)
 - Periodic celery-beat schedule for `sync_alation` (Beat is running but no schedule rows seeded — admin can add via django_celery_beat).

@@ -20,6 +20,7 @@ That's the entire installation. Wait 60–90 seconds, then open:
 | URL | Service | Login |
 |-----|---------|-------|
 | http://localhost/admin/        | Django portal / admin | `admin / admin` |
+| http://localhost:8585/         | **OpenMetadata** catalog | `admin@open-metadata.org / admin` |
 | http://localhost:9001/         | MinIO console         | `minioadmin / minioadmin` |
 | http://localhost:3000/         | Marquez UI (lineage)  | — |
 | http://localhost:8081/         | Schema Registry REST  | — |
@@ -76,6 +77,10 @@ That's the entire installation. Wait 60–90 seconds, then open:
 | `marquez` + `marquez-db` | Lineage backend |
 | `marquez-web` | Lineage UI |
 | `init-job` | One-shot: creates MinIO buckets |
+| `openmetadata-db` | OpenMetadata's Postgres |
+| `openmetadata-opensearch` | OpenSearch (search backend for OpenMetadata) |
+| `openmetadata-migrate` | One-shot: OpenMetadata schema migrations |
+| `openmetadata-server` | **OpenMetadata data catalog** (UI on `:8585`) |
 | `nginx` | Reverse proxy on port 80 |
 
 ---
@@ -104,26 +109,53 @@ You can monitor progress on the runs page (auto-refreshes status).
 2. Download the freshly-built `.xlsx`.
 3. (Optional) Edit `owner_email`, `tags`, add quality rules, tweak descriptions.
 4. In Django Admin, go to **Data Product Uploads → Add Data Product Upload**, attach the file, click **Save**.
-5. The Excel is parsed → **DataProduct** + **Dataset** + **Column** + **LineageEdge** records are created → **contract.yaml** is written to MinIO `contracts/<product>/contract.yaml` → payload is **published to Alation**.
+5. The Excel is parsed → **DataProduct** + **Dataset** + **Column** + **LineageEdge** records are created → **contract.yaml** is written to MinIO `contracts/<product>/contract.yaml` → payload is **published to OpenMetadata** (or Alation, depending on `CATALOG_PROVIDER`).
 
 ---
 
 ## Step 3 — View results
 
-- **Django Admin → Data Products** — published products + alation_id.
-- **Django Admin → Alation Sync Logs** — every payload sent (success or fail).
+- **OpenMetadata UI** at http://localhost:8585 — published Data Products + tables + lineage.
+- **Django Admin → Data Products** — published products + external_id link.
+- **Django Admin → Catalog Sync Logs** — every payload sent (success or fail).
 - **Marquez UI** at http://localhost:3000 — see the lineage graph of jobs and datasets.
 - **MinIO** at http://localhost:9001 — browse Parquet files and contracts.
 
 ---
 
-## Alation: real vs mock
+## Catalog: OpenMetadata (default, runs in Docker)
 
-Default: `ALATION_MODE=mock`. Every "publish" call writes the exact JSON payload to `./alation_sync/<timestamp>_<product>.json` instead of hitting an API. Perfect for offline demos.
+OpenMetadata is the open-source data catalog included in this stack. UI at http://localhost:8585.
 
-To connect a **real Alation tenant**, edit `.env`:
+### First-time bot token setup (5 minutes)
+
+1. Open http://localhost:8585.
+2. Login: `admin@open-metadata.org` / `admin`.
+3. Top-right gear → **Bots** → click **ingestion-bot**.
+4. Click **Copy Token** next to the JWT field.
+5. Paste into `.env`:
+   ```
+   OPENMETADATA_JWT_TOKEN=<paste>
+   ```
+6. Restart the portal:
+   ```
+   make restart-portal
+   ```
+
+That's it. Every subsequent Excel upload publishes a real Data Product into OpenMetadata's UI under **Domains → \<your domain\>** and **Explore → Data Products**.
+
+> Until you paste the JWT token, the portal falls back to **mock mode** (writes JSON to `./alation_sync/*.json`). The pipeline still completes end-to-end so you can validate the rest.
+
+---
+
+## Alation: real tenant (optional, no Docker image exists)
+
+> Use Alation only if you have a paid Alation tenant. There is no Alation Docker image.
+
+Set in `.env`:
 
 ```
+CATALOG_PROVIDER=alation
 ALATION_MODE=real
 ALATION_BASE_URL=https://yourtenant.alationcatalog.com
 ALATION_REFRESH_TOKEN=<refresh token from Alation Account Settings>
@@ -132,19 +164,7 @@ ALATION_DATA_SOURCE_ID=<source id where DPs live>
 ALATION_FOLDER_ID=<optional folder id>
 ```
 
-Then:
-
-```
-make restart-portal
-```
-
-How to obtain each value:
-1. **Refresh Token**: Log in → profile → Account Settings → Authentication → *Create Refresh Token*. Copy the token (shown once).
-2. **User ID**: Open your profile; URL ends `/user/<id>/`.
-3. **Data Source ID**: Apps → Sources → open desired source; URL contains `/data/<id>/`.
-4. **Folder ID** (optional): Open the destination folder; URL contains `/folder/<id>/`.
-
-The app auto-exchanges the Refresh Token for an API Access Token and refreshes it before expiry.
+Then `make restart-portal`. The app auto-exchanges the Refresh Token for an API Access Token and refreshes it before expiry.
 
 ---
 
@@ -193,8 +213,9 @@ Example: `DOMAIN=restaurant make generate-medium`
 - **Small (10K rows)**: ~5 sec, < 50 MB RAM.
 - **Medium (1M rows)**: ~30 sec, ~500 MB RAM.
 - **Large (100M rows)**: ~10 min, peak ~3 GB RAM, ~8 GB MinIO disk.
+- **OpenMetadata stack** adds ~3 GB RAM (server 1 GB + opensearch 1 GB + postgres 200 MB).
 
-Bump Docker Desktop's memory to **≥ 6 GB** for comfortable Large runs.
+**Total recommended**: Docker Desktop with **≥ 8 GB memory** allocated. Bump to ≥ 12 GB if you'll run Large generation.
 
 ---
 

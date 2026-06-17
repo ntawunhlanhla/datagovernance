@@ -128,6 +128,17 @@ EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
 LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "anthropic")
 LLM_MODEL = os.environ.get("LLM_MODEL", "claude-sonnet-4-6")
 
+# ===== Catalog provider =====
+# Options: "openmetadata" (default — runs in Docker), "alation", "mock"
+CATALOG_PROVIDER = os.environ.get("CATALOG_PROVIDER", "openmetadata")
+
+OPENMETADATA = {
+    "BASE_URL": os.environ.get("OPENMETADATA_BASE_URL", "http://openmetadata-server:8585"),
+    "PUBLIC_URL": os.environ.get("OPENMETADATA_PUBLIC_URL", "http://localhost:8585"),
+    "JWT_TOKEN": os.environ.get("OPENMETADATA_JWT_TOKEN", ""),
+    "SERVICE_NAME": os.environ.get("OPENMETADATA_SERVICE_NAME", "MetadataGovernancePlatform"),
+}
+
 ALATION = {
     "MODE": os.environ.get("ALATION_MODE", "mock"),
     "BASE_URL": os.environ.get("ALATION_BASE_URL", ""),

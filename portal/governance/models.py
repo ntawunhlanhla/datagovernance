@@ -101,7 +101,9 @@ class DataProduct(TimestampedModel):
     source_connection = models.ForeignKey(SourceConnection, on_delete=models.SET_NULL, null=True, blank=True)
     generation_run = models.ForeignKey(GenerationRun, on_delete=models.SET_NULL, null=True, blank=True)
     status = models.CharField(max_length=16, choices=STATUS_CHOICES, default="draft")
-    alation_id = models.CharField(max_length=64, blank=True)
+    catalog_provider = models.CharField(max_length=32, default="openmetadata", help_text="openmetadata | alation | mock")
+    external_id = models.CharField(max_length=255, blank=True, help_text="ID of the published object in the catalog")
+    external_url = models.URLField(max_length=512, blank=True, help_text="Direct UI link in the catalog")
     contract_object_key = models.CharField(max_length=512, blank=True)
     error = models.TextField(blank=True)
     published_at = models.DateTimeField(null=True, blank=True)
@@ -190,9 +192,10 @@ class DataProductUpload(TimestampedModel):
         return f"Upload#{self.pk} ({self.status})"
 
 
-class AlationSyncLog(TimestampedModel):
-    data_product = models.ForeignKey(DataProduct, on_delete=models.CASCADE, related_name="alation_logs")
-    mode = models.CharField(max_length=8, choices=[("real", "Real"), ("mock", "Mock")])
+class CatalogSyncLog(TimestampedModel):
+    PROVIDER_CHOICES = [("openmetadata", "OpenMetadata"), ("alation", "Alation"), ("mock", "Mock")]
+    data_product = models.ForeignKey(DataProduct, on_delete=models.CASCADE, related_name="catalog_logs")
+    provider = models.CharField(max_length=32, choices=PROVIDER_CHOICES, default="mock")
     request_payload = models.JSONField(default=dict)
     response_payload = models.JSONField(default=dict, blank=True)
     success = models.BooleanField(default=False)

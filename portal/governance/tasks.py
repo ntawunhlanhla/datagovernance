@@ -15,7 +15,7 @@ from .models import (
     LineageEdge,
     QualityRule,
     DataProductUpload,
-    AlationSyncLog,
+    CatalogSyncLog,
 )
 
 logger = logging.getLogger(__name__)
@@ -200,7 +200,7 @@ def generate_excel_definition(run_id: int):
 
 
 # ============================================================
-# TASK 3: Ingest uploaded Excel → create Data Product in Alation
+# TASK 3: Ingest uploaded Excel → create Data Product in the catalog
 # ============================================================
 @shared_task(bind=True, name="governance.tasks.ingest_data_product_excel")
 def ingest_data_product_excel(self, upload_id: int):
@@ -208,7 +208,6 @@ def ingest_data_product_excel(self, upload_id: int):
     from .services.excel_service import parse_excel
     from .services.contract_generator import build_contract
     from .services.minio_client import MinIOService
-    from .services.alation_client import AlationClient
 
     upload = DataProductUpload.objects.get(pk=upload_id)
     upload.status = "processing"
@@ -280,8 +279,9 @@ def ingest_data_product_excel(self, upload_id: int):
         dp.contract_object_key = f"{settings.MINIO_BUCKETS['contracts']}/{contract_key}"
         dp.save(update_fields=["contract_object_key"])
 
-        # ---------- 4. Publish to Alation ----------
-        alation = AlationClient()
+        # ---------- 4. Publish to Catalog (OpenMetadata / Alation / mock) ----------
+        from .catalog import get_catalog_client
+        catalog = get_catalog_client()
         payload = {
             "name": parsed["name"],
             "description": parsed.get("description", ""),
@@ -293,14 +293,16 @@ def ingest_data_product_excel(self, upload_id: int):
             "lineage": parsed.get("lineage", []),
             "contract_url": f"{settings.MINIO_PUBLIC_ENDPOINT}/{dp.contract_object_key}",
         }
-        sync_log = AlationSyncLog.objects.create(
+        sync_log = CatalogSyncLog.objects.create(
             data_product=dp,
-            mode=alation.mode,
+            provider=catalog.provider,
             request_payload=payload,
         )
         try:
-            result = alation.publish_data_product(payload)
-            dp.alation_id = result.get("alation_id", "")
+            result = catalog.publish_data_product(payload)
+            dp.external_id = result.get("external_id", "")
+            dp.external_url = result.get("ui_url", "") or ""
+            dp.catalog_provider = catalog.provider
             sync_log.response_payload = result
             sync_log.success = True
             sync_log.save()
@@ -313,12 +315,13 @@ def ingest_data_product_excel(self, upload_id: int):
         # ---------- 5. Mark done ----------
         dp.status = "published"
         dp.published_at = datetime.now(timezone.utc)
-        dp.save(update_fields=["status", "alation_id", "published_at"])
+        dp.save(update_fields=["status", "external_id", "external_url", "catalog_provider", "published_at"])
 
         upload.data_product = dp
         upload.status = "done"
         upload.save(update_fields=["data_product", "status"])
-        logger.info("Upload #%s -> DataProduct '%s' published (alation_id=%s)", upload.id, dp.name, dp.alation_id)
+        logger.info("Upload #%s -> DataProduct '%s' published via %s (external_id=%s)",
+                    upload.id, dp.name, catalog.provider, dp.external_id)
 
     except Exception as e:
         logger.exception("Excel ingestion failed for upload #%s", upload.id)
@@ -329,17 +332,16 @@ def ingest_data_product_excel(self, upload_id: int):
 
 
 # ============================================================
-# TASK 4: Periodic Alation re-sync (called by celery-beat)
+# TASK 4: Periodic catalog re-sync (called by celery-beat or `make alation-sync`)
 # ============================================================
 @shared_task(name="governance.tasks.sync_alation")
 def sync_alation():
-    """Re-push any data products whose Alation sync failed or are stale."""
-    from .services.alation_client import AlationClient
-    alation = AlationClient()
+    """Re-push any data products whose catalog sync failed or are stale."""
+    from .catalog import get_catalog_client
+    catalog = get_catalog_client()
     products = DataProduct.objects.filter(status__in=["draft", "failed"])
     for dp in products:
-        logger.info("Re-syncing %s to Alation", dp.name)
-        # build payload from DB
+        logger.info("Re-syncing %s via %s", dp.name, catalog.provider)
         payload = {
             "name": dp.name,
             "description": dp.description,
@@ -359,8 +361,10 @@ def sync_alation():
             "lineage": [{"upstream": le.upstream_dataset, "downstream": le.downstream_dataset, "transformation": le.transformation} for le in dp.lineage_edges.all()],
         }
         try:
-            result = alation.publish_data_product(payload)
-            dp.alation_id = result.get("alation_id", "")
+            result = catalog.publish_data_product(payload)
+            dp.external_id = result.get("external_id", "")
+            dp.external_url = result.get("ui_url", "") or ""
+            dp.catalog_provider = catalog.provider
             dp.status = "published"
             dp.published_at = datetime.now(timezone.utc)
             dp.save()

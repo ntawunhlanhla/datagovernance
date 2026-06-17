@@ -32,6 +32,11 @@ x-portal-env: &portal-env
   EMERGENT_LLM_KEY: ${EMERGENT_LLM_KEY:-sk-emergent-fCfDb84C794BeA613F}
   LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
   LLM_MODEL: ${LLM_MODEL:-claude-sonnet-4-6}
+  CATALOG_PROVIDER: ${CATALOG_PROVIDER:-openmetadata}
+  OPENMETADATA_BASE_URL: ${OPENMETADATA_BASE_URL:-http://openmetadata-server:8585}
+  OPENMETADATA_PUBLIC_URL: ${OPENMETADATA_PUBLIC_URL:-http://localhost:8585}
+  OPENMETADATA_JWT_TOKEN: ${OPENMETADATA_JWT_TOKEN:-}
+  OPENMETADATA_SERVICE_NAME: ${OPENMETADATA_SERVICE_NAME:-MetadataGovernancePlatform}
   ALATION_MODE: ${ALATION_MODE:-mock}
   ALATION_BASE_URL: ${ALATION_BASE_URL:-}
   ALATION_REFRESH_TOKEN: ${ALATION_REFRESH_TOKEN:-}
@@ -283,6 +288,108 @@ services:
       <<: *portal-env
     restart: unless-stopped
 
+  # ===================== OpenMetadata catalog =====================
+  openmetadata-db:
+    image: postgres:15-alpine
+    container_name: mg-om-db
+    environment:
+      POSTGRES_USER: openmetadata_user
+      POSTGRES_PASSWORD: openmetadata_password
+      POSTGRES_DB: openmetadata_db
+    volumes:
+      - openmetadata-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openmetadata_user -d openmetadata_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+    restart: unless-stopped
+
+  openmetadata-opensearch:
+    image: opensearchproject/opensearch:2.18.0
+    container_name: mg-om-opensearch
+    environment:
+      - discovery.type=single-node
+      - DISABLE_SECURITY_PLUGIN=true
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+      - ES_JAVA_OPTS=-Xms1024m -Xmx1024m
+      - indices.query.bool.max_clause_count=4096
+    volumes:
+      - openmetadata-os-data:/usr/share/opensearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health | grep -qE 'green|yellow'"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+    restart: unless-stopped
+
+  openmetadata-migrate:
+    image: docker.getcollate.io/openmetadata/server:1.5.13
+    container_name: mg-om-migrate
+    command: ["./bootstrap/openmetadata-ops.sh", "migrate", "--force"]
+    depends_on:
+      openmetadata-db:
+        condition: service_healthy
+      openmetadata-opensearch:
+        condition: service_healthy
+    environment: &om-env
+      OPENMETADATA_CLUSTER_NAME: openmetadata
+      SERVER_PORT: "8585"
+      SERVER_ADMIN_PORT: "8586"
+      LOG_LEVEL: INFO
+      AUTHORIZER_CLASS_NAME: org.openmetadata.service.security.DefaultAuthorizer
+      AUTHORIZER_REQUEST_FILTER: org.openmetadata.service.security.JwtFilter
+      AUTHORIZER_ADMIN_PRINCIPALS: "[admin]"
+      AUTHORIZER_INGESTION_PRINCIPALS: "[ingestion-bot]"
+      AUTHORIZER_PRINCIPAL_DOMAIN: "open-metadata.org"
+      AUTHENTICATION_PROVIDER: basic
+      AUTHENTICATION_CLIENT_TYPE: public
+      AUTHENTICATION_ENABLE_SELF_SIGNUP: "false"
+      AUTHENTICATION_PUBLIC_KEYS: "[http://openmetadata-server:8585/api/v1/system/config/jwks]"
+      AUTHENTICATION_JWT_PRINCIPAL_CLAIMS: "[email,preferred_username,sub]"
+      JWT_ISSUER: open-metadata.org
+      RSA_PUBLIC_KEY_FILE_PATH: "./conf/public_key.der"
+      RSA_PRIVATE_KEY_FILE_PATH: "./conf/private_key.der"
+      DB_DRIVER_CLASS: org.postgresql.Driver
+      DB_SCHEME: postgresql
+      DB_USE_SSL: "false"
+      DB_USER: openmetadata_user
+      DB_USER_PASSWORD: openmetadata_password
+      DB_HOST: openmetadata-db
+      DB_PORT: "5432"
+      OM_DATABASE: openmetadata_db
+      DB_PARAMS: "allowPublicKeyRetrieval=true&useSSL=false&serverTimezone=UTC"
+      ELASTICSEARCH_HOST: openmetadata-opensearch
+      ELASTICSEARCH_PORT: "9200"
+      ELASTICSEARCH_SCHEME: http
+      SEARCH_TYPE: opensearch
+      ELASTICSEARCH_CLUSTER_ALIAS: openmetadata
+      PIPELINE_SERVICE_CLIENT_ENABLED: "false"
+      PIPELINE_SERVICE_CLIENT_ENDPOINT: "http://localhost:8080"
+      MIGRATION_LIMIT_PARAM: "1200"
+      OPENMETADATA_HEAP_OPTS: "-Xmx1G -Xms1G"
+      FERNET_KEY: jJ/9sz0g0OHxsfxOoSfdFdmk3ysNmPRnH3TUAbz3IHA=
+    restart: "no"
+
+  openmetadata-server:
+    image: docker.getcollate.io/openmetadata/server:1.5.13
+    container_name: mg-om-server
+    depends_on:
+      openmetadata-migrate:
+        condition: service_completed_successfully
+    environment:
+      <<: *om-env
+    ports:
+      - "8585:8585"
+      - "8586:8586"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8586/healthcheck >/dev/null 2>&1 || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 30
+      start_period: 90s
+    restart: unless-stopped
+
   nginx:
     build:
       context: ./nginx
@@ -303,3 +410,5 @@ volumes:
   minio-data:
   portal-static:
   portal-media:
+  openmetadata-db-data:
+  openmetadata-os-data:
