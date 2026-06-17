@@ -1,5 +1,3 @@
-version: "3.9"
-
 x-portal-env: &portal-env
   DJANGO_SETTINGS_MODULE: portal.settings
   DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-change-me-in-prod}
@@ -324,7 +322,7 @@ services:
     restart: unless-stopped
 
   openmetadata-migrate:
-    image: docker.getcollate.io/openmetadata/server:1.5.13
+    image: ${OPENMETADATA_IMAGE:-openmetadata/server:1.5.13}
     container_name: mg-om-migrate
     command: ["./bootstrap/openmetadata-ops.sh", "migrate", "--force"]
     depends_on:
@@ -372,7 +370,7 @@ services:
     restart: "no"
 
   openmetadata-server:
-    image: docker.getcollate.io/openmetadata/server:1.5.13
+    image: ${OPENMETADATA_IMAGE:-openmetadata/server:1.5.13}
     container_name: mg-om-server
     depends_on:
       openmetadata-migrate:
