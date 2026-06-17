@@ -1,0 +1,81 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block content %}
+<h1>Data Generator</h1>
+<p>Generate a domain-specific data product. The LLM picks a random realistic instance (e.g. "Westridge Academy"
+for <code>school</code>, "Bella Notte Trattoria" for <code>restaurant</code>) and designs related datasets,
+writes Parquet to MinIO, registers schemas, emits Marquez lineage, and creates an Excel definition.</p>
+
+<form method="post" id="gen-form" style="max-width:520px;border:1px solid #ddd;padding:18px;border-radius:6px;">
+    {% csrf_token %}
+    <p>
+        <label><strong>Domain keyword</strong></label><br>
+        <input name="domain" placeholder="school, restaurant, hospital, bank..." value="school"
+               style="width:100%;padding:8px;font-size:15px;">
+    </p>
+    <p>
+        <strong>Pick a size:</strong>
+    </p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button type="submit" name="size" value="small" class="button" style="background:#4caf50;color:#fff;padding:10px 18px;border-radius:4px;border:0;cursor:pointer;">Small (10K rows)</button>
+        <button type="submit" name="size" value="medium" class="button" style="background:#1976d2;color:#fff;padding:10px 18px;border-radius:4px;border:0;cursor:pointer;">Medium (1M rows)</button>
+        <button type="button" id="large-btn" class="button" style="background:#d32f2f;color:#fff;padding:10px 18px;border-radius:4px;border:0;cursor:pointer;">Large (100M rows)</button>
+    </div>
+</form>
+
+<h2 style="margin-top:30px;">Recent runs</h2>
+<table class="table" style="width:100%;border-collapse:collapse;">
+    <thead><tr style="background:#eee;text-align:left;">
+        <th style="padding:8px;">ID</th><th>Domain</th><th>Instance</th><th>Size</th><th>Status</th><th>Progress</th><th>Created</th>
+    </tr></thead>
+    <tbody>
+    {% for r in runs %}
+    <tr style="border-bottom:1px solid #eee;">
+        <td style="padding:8px;"><a href="{% url 'admin:governance_generationrun_change' r.id %}">#{{ r.id }}</a></td>
+        <td>{{ r.domain }}</td>
+        <td>{{ r.chosen_instance|default:"…" }}</td>
+        <td>{{ r.get_size_display }}</td>
+        <td><strong>{{ r.get_status_display }}</strong></td>
+        <td>{{ r.progress_pct }}%</td>
+        <td>{{ r.created_at|date:"Y-m-d H:i" }}</td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="7" style="padding:14px;color:#888;">No runs yet.</td></tr>
+    {% endfor %}
+    </tbody>
+</table>
+
+<!-- Confirmation modal for Large dataset -->
+<div id="large-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;align-items:center;justify-content:center;">
+    <div style="background:#fff;padding:30px;border-radius:8px;max-width:480px;">
+        <h2 style="margin-top:0;color:#d32f2f;">⚠ Generate Large dataset?</h2>
+        <p>This will generate <strong>100,000,000 rows per dataset</strong>:</p>
+        <ul>
+            <li>≈ <strong>8 GB</strong> of Parquet uploaded to MinIO</li>
+            <li>≈ <strong>10 minutes</strong> of CPU time</li>
+            <li>Container needs at least <strong>4 GB RAM</strong></li>
+        </ul>
+        <p>Are you sure?</p>
+        <div style="display:flex;gap:10px;justify-content:flex-end;">
+            <button type="button" id="cancel-large" style="padding:8px 16px;">Cancel</button>
+            <button type="button" id="confirm-large" style="padding:8px 16px;background:#d32f2f;color:#fff;border:0;border-radius:4px;cursor:pointer;">Yes, generate Large</button>
+        </div>
+    </div>
+</div>
+
+<script>
+(function(){
+    const modal = document.getElementById('large-modal');
+    document.getElementById('large-btn').addEventListener('click', () => modal.style.display = 'flex');
+    document.getElementById('cancel-large').addEventListener('click', () => modal.style.display = 'none');
+    document.getElementById('confirm-large').addEventListener('click', () => {
+        const f = document.getElementById('gen-form');
+        const input = document.createElement('input');
+        input.type = 'hidden'; input.name = 'size'; input.value = 'large';
+        f.appendChild(input);
+        f.submit();
+    });
+})();
+</script>
+{% endblock %}

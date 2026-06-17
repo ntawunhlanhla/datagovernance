@@ -1,0 +1,305 @@
+version: "3.9"
+
+x-portal-env: &portal-env
+  DJANGO_SETTINGS_MODULE: portal.settings
+  DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-change-me-in-prod}
+  DJANGO_DEBUG: ${DJANGO_DEBUG:-0}
+  DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-*}
+  DJANGO_SUPERUSER_USERNAME: ${DJANGO_SUPERUSER_USERNAME:-admin}
+  DJANGO_SUPERUSER_PASSWORD: ${DJANGO_SUPERUSER_PASSWORD:-admin}
+  DJANGO_SUPERUSER_EMAIL: ${DJANGO_SUPERUSER_EMAIL:-admin@example.com}
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: 5432
+  POSTGRES_DB: ${POSTGRES_DB:-metadata}
+  POSTGRES_USER: ${POSTGRES_USER:-metadata}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-metadata}
+  REDIS_URL: redis://redis:6379/0
+  CELERY_BROKER_URL: redis://redis:6379/1
+  CELERY_RESULT_BACKEND: redis://redis:6379/2
+  MINIO_ENDPOINT: minio:9000
+  MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-http://localhost:9000}
+  MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+  MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+  MINIO_SECURE: "false"
+  MINIO_BUCKET_RAW: raw
+  MINIO_BUCKET_CURATED: curated
+  MINIO_BUCKET_CONTRACTS: contracts
+  MINIO_BUCKET_EXCEL: excel-uploads
+  KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+  SCHEMA_REGISTRY_URL: http://schema-registry:8081
+  MARQUEZ_URL: http://marquez:5000
+  MARQUEZ_NAMESPACE: ${MARQUEZ_NAMESPACE:-metadata-governance}
+  EMERGENT_LLM_KEY: ${EMERGENT_LLM_KEY:-sk-emergent-fCfDb84C794BeA613F}
+  LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
+  LLM_MODEL: ${LLM_MODEL:-claude-sonnet-4-6}
+  ALATION_MODE: ${ALATION_MODE:-mock}
+  ALATION_BASE_URL: ${ALATION_BASE_URL:-}
+  ALATION_REFRESH_TOKEN: ${ALATION_REFRESH_TOKEN:-}
+  ALATION_USER_ID: ${ALATION_USER_ID:-}
+  ALATION_DATA_SOURCE_ID: ${ALATION_DATA_SOURCE_ID:-}
+  ALATION_FOLDER_ID: ${ALATION_FOLDER_ID:-}
+  AWS_REGION: ${AWS_REGION:-us-east-1}
+  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+  AWS_S3_BUCKET: ${AWS_S3_BUCKET:-}
+  AWS_ATHENA_OUTPUT: ${AWS_ATHENA_OUTPUT:-}
+  AWS_GLUE_DATABASE: ${AWS_GLUE_DATABASE:-}
+
+services:
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: mg-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-metadata}
+      POSTGRES_USER: ${POSTGRES_USER:-metadata}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-metadata}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-metadata}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: mg-redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: mg-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    healthcheck:
+      test: ["CMD-SHELL", "echo ruok | nc -w 2 localhost 2181 | grep imok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: mg-kafka
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    ports:
+      - "9092:9092"
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:29092 --list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+    restart: unless-stopped
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.5.0
+    container_name: mg-schema-registry
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka:29092
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+    ports:
+      - "8081:8081"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8081/subjects >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:RELEASE.2024-08-17T01-24-54Z
+    container_name: mg-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:9000/minio/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  marquez-db:
+    image: postgres:15-alpine
+    container_name: mg-marquez-db
+    environment:
+      POSTGRES_USER: marquez
+      POSTGRES_PASSWORD: marquez
+      POSTGRES_DB: marquez
+    volumes:
+      - marquez-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U marquez"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  marquez:
+    image: marquezproject/marquez:0.46.0
+    container_name: mg-marquez
+    depends_on:
+      marquez-db:
+        condition: service_healthy
+    environment:
+      MARQUEZ_PORT: 5000
+      MARQUEZ_ADMIN_PORT: 5001
+      POSTGRES_HOST: marquez-db
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: marquez
+      POSTGRES_USER: marquez
+      POSTGRES_PASSWORD: marquez
+    ports:
+      - "5000:5000"
+      - "5001:5001"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:5001/healthcheck >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 15
+    restart: unless-stopped
+
+  marquez-web:
+    image: marquezproject/marquez-web:0.46.0
+    container_name: mg-marquez-web
+    depends_on:
+      marquez:
+        condition: service_healthy
+    environment:
+      MARQUEZ_HOST: marquez
+      MARQUEZ_PORT: 5000
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+  init-job:
+    build:
+      context: ./init-job
+    container_name: mg-init-job
+    depends_on:
+      minio:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: *portal-env
+    restart: "no"
+
+  metadata-portal:
+    build:
+      context: ./portal
+    container_name: mg-portal
+    command: ["gunicorn", "portal.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "3", "--access-logfile", "-"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      init-job:
+        condition: service_completed_successfully
+    environment:
+      <<: *portal-env
+    volumes:
+      - portal-static:/app/staticfiles
+      - portal-media:/app/media
+      - ./alation_sync:/app/alation_sync
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/healthz/ >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  celery-worker:
+    build:
+      context: ./portal
+    container_name: mg-celery-worker
+    command: ["celery", "-A", "portal", "worker", "-Q", "default,pipeline", "--loglevel=info", "--concurrency=2"]
+    depends_on:
+      metadata-portal:
+        condition: service_healthy
+    environment:
+      <<: *portal-env
+    volumes:
+      - ./alation_sync:/app/alation_sync
+    restart: unless-stopped
+
+  celery-beat:
+    build:
+      context: ./portal
+    container_name: mg-celery-beat
+    command: ["celery", "-A", "portal", "beat", "--loglevel=info", "--scheduler", "django_celery_beat.schedulers:DatabaseScheduler"]
+    depends_on:
+      metadata-portal:
+        condition: service_healthy
+    environment:
+      <<: *portal-env
+    restart: unless-stopped
+
+  data-generator:
+    build:
+      context: ./portal
+    container_name: mg-data-generator
+    command: ["celery", "-A", "portal", "worker", "-Q", "generator", "--loglevel=info", "--concurrency=1"]
+    depends_on:
+      metadata-portal:
+        condition: service_healthy
+      schema-registry:
+        condition: service_healthy
+      marquez:
+        condition: service_healthy
+    environment:
+      <<: *portal-env
+    restart: unless-stopped
+
+  nginx:
+    build:
+      context: ./nginx
+    container_name: mg-nginx
+    depends_on:
+      metadata-portal:
+        condition: service_healthy
+    ports:
+      - "80:80"
+    volumes:
+      - portal-static:/app/staticfiles:ro
+      - portal-media:/app/media:ro
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  marquez-db-data:
+  minio-data:
+  portal-static:
+  portal-media:

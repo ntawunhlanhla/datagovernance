@@ -1,0 +1,35 @@
+# Env
+.env
+.env.local
+*.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.pytest_cache/
+
+# Django
+*.sqlite3
+db.sqlite3
+staticfiles/
+media/
+*.log
+
+# Docker
+.docker/
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Alation mock output (generated)
+alation_sync/*.json
+
+# Generated data (kept inside MinIO container volume — these are local stray files)
+*.parquet.tmp
+*.tmp

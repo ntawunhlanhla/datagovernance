@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Metadata Governance Platform</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; background: #f7f8fa; color: #222;}
+        header { background: #1a1f36; color: #fff; padding: 18px 32px; }
+        header h1 { margin: 0; font-size: 22px;}
+        nav a { color: #fff; margin-left: 18px; text-decoration: none; opacity: 0.85;}
+        nav a:hover { opacity: 1; text-decoration: underline; }
+        .wrap { max-width: 1100px; margin: 30px auto; padding: 0 24px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }
+        .card { background: #fff; border: 1px solid #e2e5ea; border-radius: 8px; padding: 18px; }
+        .card h3 { margin-top: 0; }
+        .pill { display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;background:#eef1f6;color:#444;}
+        .pill.ok{background:#e1f5e8;color:#1b6d33;}
+        .pill.warn{background:#fef3c7;color:#92400e;}
+        .pill.err{background:#fee2e2;color:#991b1b;}
+        table{width:100%;border-collapse:collapse;}
+        th,td{padding:8px;border-bottom:1px solid #eee;text-align:left;font-size:14px;}
+    </style>
+</head>
+<body>
+<header>
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+        <h1>🧬 Metadata Governance Platform</h1>
+        <nav>
+            <a href="/admin/">Admin</a>
+            <a href="/admin/governance/generationrun/generator/">Data Generator</a>
+            <a href="http://localhost:9001" target="_blank">MinIO</a>
+            <a href="http://localhost:3000" target="_blank">Marquez</a>
+            <a href="http://localhost:8081" target="_blank">Schema Registry</a>
+        </nav>
+    </div>
+</header>
+
+<div class="wrap">
+    <div class="grid">
+        <div class="card">
+            <h3>1. Generate Data</h3>
+            <p>Pick a domain (school, restaurant, hospital, bank…) and click Small/Medium/Large. The LLM designs realistic datasets and writes them to MinIO.</p>
+            <a href="/admin/governance/generationrun/generator/" class="pill ok">Open Generator →</a>
+        </div>
+        <div class="card">
+            <h3>2. Upload Excel</h3>
+            <p>The generator creates an Excel Data Product Definition. Edit it (owner, tags, etc.) and upload it via Django Admin → Data Product Uploads.</p>
+            <a href="/admin/governance/dataproductupload/add/" class="pill ok">Upload Excel →</a>
+        </div>
+        <div class="card">
+            <h3>3. Publish</h3>
+            <p>Pipeline auto-generates a data contract, registers schemas, emits Marquez lineage, and publishes the Data Product to Alation.</p>
+            <a href="/admin/governance/dataproduct/" class="pill ok">View Data Products →</a>
+        </div>
+    </div>
+
+    <h2 style="margin-top:36px;">Recent generation runs</h2>
+    <div class="card">
+        <table>
+            <thead><tr><th>#</th><th>Domain</th><th>Instance</th><th>Size</th><th>Status</th><th>Progress</th></tr></thead>
+            <tbody>
+            {% for r in recent_runs %}
+            <tr>
+                <td>#{{ r.id }}</td><td>{{ r.domain }}</td><td>{{ r.chosen_instance|default:"…" }}</td>
+                <td>{{ r.get_size_display }}</td>
+                <td><span class="pill {% if r.status == 'completed' %}ok{% elif r.status == 'failed' %}err{% else %}warn{% endif %}">{{ r.get_status_display }}</span></td>
+                <td>{{ r.progress_pct }}%</td>
+            </tr>
+            {% empty %}<tr><td colspan="6" style="color:#888;">No runs yet — open the generator above.</td></tr>{% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <h2 style="margin-top:30px;">Recent data products</h2>
+    <div class="card">
+        <table>
+            <thead><tr><th>Name</th><th>Domain</th><th>Tier</th><th>Status</th><th>Alation ID</th></tr></thead>
+            <tbody>
+            {% for p in recent_products %}
+            <tr>
+                <td><a href="/admin/governance/dataproduct/{{ p.id }}/change/">{{ p.name }}</a></td>
+                <td>{{ p.domain }}</td><td>{{ p.tier }}</td>
+                <td><span class="pill {% if p.status == 'published' %}ok{% elif p.status == 'failed' %}err{% else %}warn{% endif %}">{{ p.get_status_display }}</span></td>
+                <td><code>{{ p.alation_id|default:"—" }}</code></td>
+            </tr>
+            {% empty %}<tr><td colspan="5" style="color:#888;">No data products yet — upload an Excel.</td></tr>{% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+</body>
+</html>
