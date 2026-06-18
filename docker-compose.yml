@@ -83,7 +83,7 @@ services:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
     healthcheck:
-      test: ["CMD-SHELL", "echo ruok | nc -w 2 localhost 2181 | grep imok"]
+      test: ["CMD-SHELL", "echo ruok | zookeeper-shell localhost:2181 2>/dev/null | grep -c imok || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -145,7 +145,7 @@ services:
     volumes:
       - minio-data:/data
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:9000/minio/health/ready"]
+      test: ["CMD-SHELL", "mc ready local 2>/dev/null || wget -qO- http://localhost:9000/minio/health/ready"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -182,8 +182,8 @@ services:
       POSTGRES_USER: marquez
       POSTGRES_PASSWORD: marquez
     ports:
-      - "5000:5000"
-      - "5001:5001"
+      - "5010:5000"
+      - "5011:5001"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:5001/healthcheck >/dev/null 2>&1 || exit 1"]
       interval: 15s
