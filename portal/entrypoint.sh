@@ -17,8 +17,24 @@ echo "[entrypoint] redis is up"
 # Celery workers skip these (env SKIP_DJANGO_BOOTSTRAP=1)
 if [ "${SKIP_DJANGO_BOOTSTRAP:-0}" != "1" ] && [[ "$1" == "gunicorn" || "$1" == "python" || -z "$1" ]]; then
   echo "[entrypoint] running migrations..."
+  # Apply governance app migrations explicitly when present.
+  python manage.py migrate governance --noinput || true
   # Create tables for apps without migration files (e.g. governance)
   python manage.py migrate --noinput --run-syncdb
+
+  echo "[entrypoint] verifying governance tables..."
+  python manage.py shell <<'PYCODE'
+from django.db import connection
+
+required = {"governance_generationrun", "governance_dataproduct"}
+with connection.cursor() as cursor:
+    tables = set(connection.introspection.table_names(cursor))
+
+missing = sorted(required - tables)
+if missing:
+    raise SystemExit(f"Missing required governance tables after migration: {', '.join(missing)}")
+print("governance tables verified")
+PYCODE
 
   echo "[entrypoint] collecting static files..."
   python manage.py collectstatic --noinput || true
