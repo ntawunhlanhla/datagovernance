@@ -83,7 +83,7 @@ services:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
     healthcheck:
-      test: ["CMD-SHELL", "echo ruok | zookeeper-shell localhost:2181 2>/dev/null | grep -c imok || exit 1"]
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/2181; printf ruok >&3; read -t 2 r <&3; exec 3>&-; [[ \"$r\" == imok ]]'"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -169,6 +169,7 @@ services:
 
   marquez:
     image: marquezproject/marquez:0.46.0
+    platform: linux/amd64
     container_name: mg-marquez
     depends_on:
       marquez-db:
@@ -193,6 +194,7 @@ services:
 
   marquez-web:
     image: marquezproject/marquez-web:0.46.0
+    platform: linux/amd64
     container_name: mg-marquez-web
     depends_on:
       marquez:
