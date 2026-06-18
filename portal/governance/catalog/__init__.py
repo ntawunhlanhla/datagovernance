@@ -18,18 +18,19 @@ def get_catalog_client() -> BaseCatalogClient:
     """Return the configured catalog client.
 
     Resolution order:
-      1. settings.CATALOG_PROVIDER == "openmetadata" + JWT present -> OpenMetadata
-      2. settings.CATALOG_PROVIDER == "alation" and ALATION_MODE=="real" -> Alation
+      1. settings.CATALOG_PROVIDER == "openmetadata" -> OpenMetadata
+         (JWT auto-bootstraps from admin creds if not explicitly set; falls back to mock on failure)
+      2. settings.CATALOG_PROVIDER == "alation" and ALATION_MODE == "real" -> Alation
       3. otherwise -> Mock (writes payloads to ./alation_sync/)
     """
     provider = (settings.CATALOG_PROVIDER or "mock").lower()
 
     if provider == "openmetadata":
-        if not settings.OPENMETADATA.get("JWT_TOKEN"):
-            logger.warning("OPENMETADATA_JWT_TOKEN not set -> falling back to MOCK adapter. "
-                           "Paste a bot token into .env to publish to OpenMetadata UI.")
+        try:
+            return OpenMetadataClient()
+        except OpenMetadataError as e:
+            logger.warning("OpenMetadata adapter unavailable (%s) -> falling back to MOCK.", e)
             return MockCatalogClient()
-        return OpenMetadataClient()
 
     if provider == "alation":
         if settings.ALATION.get("MODE") != "real" or not settings.ALATION.get("BASE_URL"):

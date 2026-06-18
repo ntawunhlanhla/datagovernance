@@ -127,24 +127,34 @@ You can monitor progress on the runs page (auto-refreshes status).
 
 OpenMetadata is the open-source data catalog included in this stack. UI at http://localhost:8585.
 
-### First-time bot token setup (5 minutes)
+### Zero-config: JWT auto-bootstrap
 
-1. Open http://localhost:8585.
-2. Login: `admin@open-metadata.org` / `admin`.
-3. Top-right gear → **Bots** → click **ingestion-bot**.
-4. Click **Copy Token** next to the JWT field.
-5. Paste into `.env`:
-   ```
-   OPENMETADATA_JWT_TOKEN=<paste>
-   ```
-6. Restart the portal:
-   ```
-   make restart-portal
-   ```
+Out of the box, the platform auto-fetches the ingestion-bot's JWT by logging into OpenMetadata as admin (`admin@open-metadata.org` / `admin` — the default OM credentials). **No manual token copy-paste needed.** Just upload an Excel and the Data Product appears in the OpenMetadata UI.
 
-That's it. Every subsequent Excel upload publishes a real Data Product into OpenMetadata's UI under **Domains → \<your domain\>** and **Explore → Data Products**.
+### When you'll want to override
 
-> Until you paste the JWT token, the portal falls back to **mock mode** (writes JSON to `./alation_sync/*.json`). The pipeline still completes end-to-end so you can validate the rest.
+- **You changed the OpenMetadata admin password** → set `OPENMETADATA_ADMIN_PASSWORD=<new pass>` in `.env` and `docker compose up -d`.
+- **You use SSO / external auth in OpenMetadata** → mint a long-lived JWT manually and paste into `OPENMETADATA_JWT_TOKEN`. The hard-coded value takes priority over the bootstrap.
+
+### Verify it's working
+
+After your first Excel upload, check:
+
+```bash
+docker compose exec postgres psql -U metadata -d metadata -c "SELECT name, catalog_provider, external_id FROM governance_dataproduct;"
+```
+
+You want `catalog_provider = openmetadata` and a real UUID in `external_id`. If you see `mock` instead, look at celery-worker logs for the bootstrap warning.
+
+### Where to find the published Data Product
+
+```
+http://localhost:8585/domain          ← see your domain (hospital, school, …)
+http://localhost:8585/explore         ← global search/filter
+http://localhost:8585/explore/tables  ← all tables
+```
+
+Use the top-nav search bar to find by name.
 
 ---
 

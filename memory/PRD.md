@@ -44,6 +44,11 @@ Docker startup must: build images, run migrations, init MinIO buckets, generate 
 - Real Alation v2 custom object schema may differ per tenant — payload builder is generic and easy to override.
 - UI tests / integration tests — none added (test_reports/ kept but empty).
 
+## Bug fixes applied during deployment
+- **`docker compose up -d` now creates DB tables**: `entrypoint.sh` runs `makemigrations governance --noinput` before `migrate --noinput`.
+- **Celery workers can read uploaded Excel files**: `portal-media` volume mounted in `celery-worker`, `celery-beat`, `data-generator` (was only in `metadata-portal`).
+- **OpenMetadata JWT auto-bootstrap**: `OpenMetadataClient` now auto-fetches the ingestion-bot JWT by logging in as admin (defaults `admin@open-metadata.org` / `admin` — overridable via `OPENMETADATA_ADMIN_EMAIL`/`OPENMETADATA_ADMIN_PASSWORD`). Handles 3 different OM API response shapes for cross-version compatibility. Cached for 50 minutes.
+
 ## Next action items (after first boot)
 1. Run `docker compose up -d`. Wait ~90s for healthchecks.
 2. Visit `http://localhost/admin/` (admin/admin) → Data Generator → type "school" → click Small.

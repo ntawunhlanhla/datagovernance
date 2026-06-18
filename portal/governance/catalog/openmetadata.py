@@ -2,6 +2,11 @@
 
 Publishes a Data Product via OpenMetadata REST API. Bot JWT token auth.
 
+The JWT can be supplied explicitly via OPENMETADATA_JWT_TOKEN, OR it will be
+auto-fetched at runtime by logging into the OpenMetadata admin account
+(default: admin@open-metadata.org / admin) and reading the ingestion-bot's
+authentication mechanism. The auto-fetched token is cached in memory.
+
 Pipeline performed for each upload:
   1. ensure Database Service ("MetadataGovernancePlatform", type "CustomDatabase")
   2. ensure Database ("default")
@@ -11,7 +16,9 @@ Pipeline performed for each upload:
   6. create/upsert DataProduct linking the tables
   7. POST lineage edges between tables
 """
+import base64
 import logging
+import time
 from typing import Any
 
 import requests
@@ -26,6 +33,40 @@ class OpenMetadataError(Exception):
     pass
 
 
+# Endpoint suffixes to try for fetching the ingestion-bot JWT (varies by OM version)
+_BOT_JWT_ENDPOINTS = [
+    "/api/v1/users/auth-mechanism/ingestion-bot",
+    "/api/v1/users/name/ingestion-bot?fields=authenticationMechanism",
+    "/api/v1/bots/name/ingestion-bot",
+]
+
+
+def _extract_jwt(payload: dict) -> str | None:
+    """Walk the response structure for a JWTToken value (OM API shape differs by version)."""
+    if not isinstance(payload, dict):
+        return None
+    # Direct
+    if payload.get("JWTToken"):
+        return payload["JWTToken"]
+    # config.JWTToken
+    cfg = payload.get("config")
+    if isinstance(cfg, dict) and cfg.get("JWTToken"):
+        return cfg["JWTToken"]
+    # authenticationMechanism.config.JWTToken (user-name endpoint)
+    am = payload.get("authenticationMechanism")
+    if isinstance(am, dict):
+        c = am.get("config") or {}
+        if c.get("JWTToken"):
+            return c["JWTToken"]
+    # Recurse one level (covers nested wrappers)
+    for v in payload.values():
+        if isinstance(v, dict):
+            t = _extract_jwt(v)
+            if t:
+                return t
+    return None
+
+
 class OpenMetadataClient(BaseCatalogClient):
     provider = "openmetadata"
 
@@ -33,21 +74,84 @@ class OpenMetadataClient(BaseCatalogClient):
     DEFAULT_DATABASE_NAME = "default"
     SERVICE_TYPE = "CustomDatabase"
 
+    # Class-level cache so multiple instances share the bootstrapped JWT
+    _cached_jwt: str | None = None
+    _cached_jwt_expires_at: float = 0
+
     def __init__(self):
         cfg = settings.OPENMETADATA
         self.base = cfg["BASE_URL"].rstrip("/")
-        self.jwt = cfg["JWT_TOKEN"]
+        self.service_name = cfg.get("SERVICE_NAME") or self.DEFAULT_SERVICE_NAME
+        self.admin_email = cfg.get("ADMIN_EMAIL", "admin@open-metadata.org")
+        self.admin_password = cfg.get("ADMIN_PASSWORD", "admin")
+
+        explicit_token = cfg.get("JWT_TOKEN") or ""
+        self.jwt = explicit_token.strip() or self._bootstrap_jwt()
         if not self.jwt:
             raise OpenMetadataError(
-                "OPENMETADATA_JWT_TOKEN is empty. Get it from the UI: "
-                "Settings → Bots → ingestion-bot → Copy Token, then paste into .env."
+                "Could not obtain an OpenMetadata JWT. Provide OPENMETADATA_JWT_TOKEN explicitly "
+                "OR ensure OPENMETADATA_ADMIN_EMAIL/OPENMETADATA_ADMIN_PASSWORD can log in."
             )
         self.headers = {
             "Authorization": f"Bearer {self.jwt}",
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
-        self.service_name = cfg.get("SERVICE_NAME") or self.DEFAULT_SERVICE_NAME
+
+    # ---------------------- JWT auto-bootstrap ----------------------
+    def _bootstrap_jwt(self) -> str:
+        """Log in as admin → fetch the ingestion-bot's permanent JWT. Cached for 50 min."""
+        cls = type(self)
+        if cls._cached_jwt and time.time() < cls._cached_jwt_expires_at:
+            return cls._cached_jwt
+
+        logger.info("OpenMetadata: bootstrapping bot JWT by logging in as %s", self.admin_email)
+        b64_pw = base64.b64encode(self.admin_password.encode()).decode()
+        try:
+            r = requests.post(
+                f"{self.base}/api/v1/users/login",
+                json={"email": self.admin_email, "password": b64_pw},
+                timeout=15,
+            )
+            if not r.ok:
+                logger.warning("OpenMetadata admin login failed: %s %s", r.status_code, r.text[:300])
+                return ""
+            admin_token = r.json().get("accessToken")
+            if not admin_token:
+                logger.warning("OpenMetadata login returned no accessToken: %s", r.text[:300])
+                return ""
+        except Exception as e:
+            logger.warning("OpenMetadata login HTTP error: %s", e)
+            return ""
+
+        auth_headers = {"Authorization": f"Bearer {admin_token}", "Accept": "application/json"}
+        for suffix in _BOT_JWT_ENDPOINTS:
+            try:
+                br = requests.get(f"{self.base}{suffix}", headers=auth_headers, timeout=15)
+                if not br.ok:
+                    logger.debug("Bot JWT endpoint %s -> %s", suffix, br.status_code)
+                    continue
+                jwt = _extract_jwt(br.json())
+                if jwt:
+                    cls._cached_jwt = jwt
+                    cls._cached_jwt_expires_at = time.time() + 50 * 60
+                    logger.info("OpenMetadata bot JWT bootstrapped successfully (from %s)", suffix)
+                    return jwt
+            except Exception as e:
+                logger.debug("Bot JWT fetch error on %s: %s", suffix, e)
+
+        logger.warning("OpenMetadata: exhausted all bot JWT endpoints, no token found")
+        return ""
+
+    def _refresh_jwt_if_needed(self) -> None:
+        """Re-run bootstrap if cached token is about to expire."""
+        cls = type(self)
+        if cls._cached_jwt and time.time() >= cls._cached_jwt_expires_at:
+            cls._cached_jwt = None
+            new_token = self._bootstrap_jwt()
+            if new_token:
+                self.jwt = new_token
+                self.headers["Authorization"] = f"Bearer {new_token}"
 
     # ---------------- HTTP helpers ----------------
     def _get(self, path: str) -> requests.Response:

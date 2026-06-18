@@ -137,6 +137,8 @@ OPENMETADATA = {
     "PUBLIC_URL": os.environ.get("OPENMETADATA_PUBLIC_URL", "http://localhost:8585"),
     "JWT_TOKEN": os.environ.get("OPENMETADATA_JWT_TOKEN", ""),
     "SERVICE_NAME": os.environ.get("OPENMETADATA_SERVICE_NAME", "MetadataGovernancePlatform"),
+    "ADMIN_EMAIL": os.environ.get("OPENMETADATA_ADMIN_EMAIL", "admin@open-metadata.org"),
+    "ADMIN_PASSWORD": os.environ.get("OPENMETADATA_ADMIN_PASSWORD", "admin"),
 }
 
 ALATION = {
