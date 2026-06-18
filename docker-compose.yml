@@ -175,13 +175,11 @@ services:
       marquez-db:
         condition: service_healthy
     environment:
+      MARQUEZ_CONFIG: /opt/marquez/marquez.yml
       MARQUEZ_PORT: 5000
       MARQUEZ_ADMIN_PORT: 5001
-      POSTGRES_HOST: marquez-db
-      POSTGRES_PORT: 5432
-      POSTGRES_DB: marquez
-      POSTGRES_USER: marquez
-      POSTGRES_PASSWORD: marquez
+    volumes:
+      - ./marquez/marquez.yml:/opt/marquez/marquez.yml:ro
     ports:
       - "5010:5000"
       - "5011:5001"
