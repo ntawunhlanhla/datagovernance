@@ -255,6 +255,7 @@ services:
     environment:
       <<: *portal-env
     volumes:
+      - portal-media:/app/media
       - ./alation_sync:/app/alation_sync
     restart: unless-stopped
 
@@ -268,6 +269,8 @@ services:
         condition: service_healthy
     environment:
       <<: *portal-env
+    volumes:
+      - portal-media:/app/media
     restart: unless-stopped
 
   data-generator:
@@ -284,6 +287,8 @@ services:
         condition: service_healthy
     environment:
       <<: *portal-env
+    volumes:
+      - portal-media:/app/media
     restart: unless-stopped
 
   # ===================== OpenMetadata catalog =====================
