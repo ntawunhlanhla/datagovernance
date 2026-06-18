@@ -17,7 +17,8 @@ echo "[entrypoint] redis is up"
 # Celery workers skip these (env SKIP_DJANGO_BOOTSTRAP=1)
 if [ "${SKIP_DJANGO_BOOTSTRAP:-0}" != "1" ] && [[ "$1" == "gunicorn" || "$1" == "python" || -z "$1" ]]; then
   echo "[entrypoint] running migrations..."
-  python manage.py migrate --noinput
+  # Create tables for apps without migration files (e.g. governance)
+  python manage.py migrate --noinput --run-syncdb
 
   echo "[entrypoint] collecting static files..."
   python manage.py collectstatic --noinput || true
