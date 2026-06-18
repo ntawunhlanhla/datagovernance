@@ -16,11 +16,11 @@ echo "[entrypoint] redis is up"
 # Only the main portal container should run migrations + collectstatic + createsuperuser
 # Celery workers skip these (env SKIP_DJANGO_BOOTSTRAP=1)
 if [ "${SKIP_DJANGO_BOOTSTRAP:-0}" != "1" ] && [[ "$1" == "gunicorn" || "$1" == "python" || -z "$1" ]]; then
+  echo "[entrypoint] generating migrations for governance app..."
+  python manage.py makemigrations governance --noinput
+
   echo "[entrypoint] running migrations..."
-  # Apply governance app migrations explicitly when present.
-  python manage.py migrate governance --noinput || true
-  # Create tables for apps without migration files (e.g. governance)
-  python manage.py migrate --noinput --run-syncdb
+  python manage.py migrate --noinput
 
   echo "[entrypoint] verifying governance tables..."
   python manage.py shell <<'PYCODE'
