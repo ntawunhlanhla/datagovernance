@@ -100,12 +100,20 @@ class OpenMetadataClient(BaseCatalogClient):
 
     # ---------------------- JWT auto-bootstrap ----------------------
     def _bootstrap_jwt(self) -> str:
-        """Log in as admin → fetch the ingestion-bot's permanent JWT. Cached for 50 min."""
+        """Obtain a usable JWT for OpenMetadata API calls.
+
+        Strategy (in order):
+          1. Log in as admin → get an accessToken.
+          2. Try several version-specific endpoints to fetch the ingestion-bot's
+             permanent JWT (preferred — long-lived).
+          3. If none work, fall back to using the admin accessToken directly
+             (expires in ~1h, re-fetched on next call thanks to caching).
+        """
         cls = type(self)
         if cls._cached_jwt and time.time() < cls._cached_jwt_expires_at:
             return cls._cached_jwt
 
-        logger.info("OpenMetadata: bootstrapping bot JWT by logging in as %s", self.admin_email)
+        logger.info("OpenMetadata: bootstrapping JWT by logging in as %s", self.admin_email)
         b64_pw = base64.b64encode(self.admin_password.encode()).decode()
         try:
             r = requests.post(
@@ -125,6 +133,8 @@ class OpenMetadataClient(BaseCatalogClient):
             return ""
 
         auth_headers = {"Authorization": f"Bearer {admin_token}", "Accept": "application/json"}
+
+        # Try bot-JWT endpoints (permanent token preferred)
         for suffix in _BOT_JWT_ENDPOINTS:
             try:
                 br = requests.get(f"{self.base}{suffix}", headers=auth_headers, timeout=15)
@@ -140,7 +150,48 @@ class OpenMetadataClient(BaseCatalogClient):
             except Exception as e:
                 logger.debug("Bot JWT fetch error on %s: %s", suffix, e)
 
-        logger.warning("OpenMetadata: exhausted all bot JWT endpoints, no token found")
+        # OM 1.5.x: try via /bots → botUser.id → /users/{id}?fields=...
+        jwt = self._try_bot_via_user_lookup(auth_headers)
+        if jwt:
+            cls._cached_jwt = jwt
+            cls._cached_jwt_expires_at = time.time() + 50 * 60
+            logger.info("OpenMetadata bot JWT bootstrapped via /bots → /users/{id} chain")
+            return jwt
+
+        # Fallback: use admin's accessToken directly. Caches for 50 min and re-bootstraps on expiry.
+        logger.info("OpenMetadata: using admin accessToken directly (no bot JWT available); will refresh every 50 min")
+        cls._cached_jwt = admin_token
+        cls._cached_jwt_expires_at = time.time() + 50 * 60
+        return admin_token
+
+    def _try_bot_via_user_lookup(self, auth_headers: dict) -> str:
+        """OM 1.5.x flow: get bot → bot.botUser.id → user with auth fields."""
+        try:
+            br = requests.get(f"{self.base}/api/v1/bots/name/ingestion-bot", headers=auth_headers, timeout=15)
+            if not br.ok:
+                return ""
+            bot = br.json()
+            user_ref = bot.get("botUser") or bot.get("user")
+            if not isinstance(user_ref, dict):
+                return ""
+            user_id = user_ref.get("id")
+            if not user_id:
+                return ""
+        except Exception as e:
+            logger.debug("Bot lookup error: %s", e)
+            return ""
+
+        # Try a few field-name variants
+        for field_query in ("?fields=authenticationMechanism", "?fields=auth", ""):
+            try:
+                ur = requests.get(f"{self.base}/api/v1/users/{user_id}{field_query}", headers=auth_headers, timeout=15)
+                if not ur.ok:
+                    continue
+                jwt = _extract_jwt(ur.json())
+                if jwt:
+                    return jwt
+            except Exception:
+                continue
         return ""
 
     def _refresh_jwt_if_needed(self) -> None:
