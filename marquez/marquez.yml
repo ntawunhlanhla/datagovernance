@@ -12,8 +12,7 @@ db:
   user: marquez
   password: marquez
 
-migrate:
-  - true
+migrateOnStartup: true
 
 logging:
   level: INFO
